@@ -138,8 +138,15 @@ func (bc *BlockChain) writeStateUsingLastState(lastState State, block Block) {
 				newState.Balances[addr] = delta
 				continue
 			}
+
 			value_ := newState.Balances[addr]
-			value_ = value_.Plus(&delta)
+			if delta.Integer < 0 {
+				delta.Integer *= -1
+				value_ = value_.Minus(&delta)
+			} else {
+				value_ = value_.Plus(&delta)
+			}
+
 			newState.Balances[addr] = value_
 		}
 	}
