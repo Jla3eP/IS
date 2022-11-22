@@ -8,7 +8,7 @@ type (
 	User struct {
 		ID             primitive.ObjectID `bson:"_id"`
 		Username       string             `bson:"username"`
-		HashedPassword string             `bson:"hashed_password"`
+		HashedPassword []byte             `bson:"hashed_password"`
 		TelegramID     int                `bson:"telegram_id,omitempty"`
 	}
 

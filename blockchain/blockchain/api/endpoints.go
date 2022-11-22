@@ -157,12 +157,18 @@ func GetTransactionsWithFilters(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 
-	Request := GetTransactionsWithFiltersRequest{}
+	Request := GetTransactionsWithFiltersRequest{ResponseCh: make(chan Transactions)}
 	err = json.Unmarshal(requestBody, &Request)
 	if err != nil {
+		fmt.Println(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	panic("implement me")
+	GetTxsWithFiltersCh <- Request
+
+	resp := <-Request.ResponseCh
+	JSON, _ := json.Marshal(resp)
+
+	w.Write(JSON)
 }

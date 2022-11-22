@@ -2,6 +2,7 @@ package tests
 
 import (
 	"IS/blockchain/blockchain/api"
+	"IS/utils"
 	"testing"
 )
 
@@ -30,5 +31,12 @@ func TestValueMinus(t *testing.T) {
 		if testCase.v1.Minus(&testCase.v2) != testCase.expectedResult {
 			t.Error("Invalid result")
 		}
+	}
+}
+
+func TestToHex(t *testing.T) {
+	str := utils.ToHex([]byte{177, 179, 119, 58, 5, 192, 237, 1, 118, 120, 122, 79, 21, 116, 255, 0, 117, 247, 82, 30})
+	if str != "b1b3773a05c0ed0176787a4f1574ff0075f7521e" {
+		t.Fatal()
 	}
 }

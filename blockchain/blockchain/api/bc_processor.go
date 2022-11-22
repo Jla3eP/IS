@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-var SendTxChan = make(chan SendTxBcRequest)
-var GetBalanceChan = make(chan GetBalanceRequest)
+var SendTxChan = make(chan SendTxBcRequest, 1)
+var GetBalanceChan = make(chan GetBalanceRequest, 1)
+var GetTxsWithFiltersCh = make(chan GetTransactionsWithFiltersRequest, 1)
 
 func (bc *BlockChain) GetBlockByHash(hash *Hash) *Block {
 	block, err := GetBlockByHash(*hash)
@@ -81,8 +82,6 @@ func (bc *BlockChain) processTx(req SendTxBcRequest) {
 	}
 
 	req.ResponseCh <- nil
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
 	bc.txQueue.transactions = append(bc.txQueue.transactions, &tx)
 }
 
@@ -106,9 +105,6 @@ func (bc *BlockChain) processEpoch() {
 }
 
 func (bc *BlockChain) finalizeBlock(block *Block) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
 	err := WriteBlock(block)
 
 	bc.lastFinalizedNumber = block.Number
@@ -151,6 +147,10 @@ func (bc *BlockChain) writeStateUsingLastState(lastState State, block Block) {
 		}
 	}
 	bc.stateCache.Add(newState.LastFinalizedNumber, newState)
+	if bc.lastFinalizedNumber < block.Number {
+		bc.lastFinalizedBlock = &block
+		bc.lastFinalizedNumber = block.Number
+	}
 }
 
 func (bc *BlockChain) processBalanceRequest(req GetBalanceRequest) {
@@ -192,13 +192,62 @@ func (bc *BlockChain) loadStates() {
 	}
 }
 
+func (bc *BlockChain) getTransactionsUsingFilters(req GetTransactionsWithFiltersRequest) {
+	result := make(Transactions, 0)
+
+	for num := utils.BlockNumber(1); num <= bc.lastFinalizedNumber; num++ {
+		block := bc.GetBlockByNumber(num)
+
+		exit := false
+		for _, tx := range block.Transactions {
+			if req.TxTypes != nil {
+				if ok, _ := utils.Contains(Any, req.TxTypes); ok {
+					req.TxTypes = nil
+				} else {
+					if ok, _ := utils.Contains(tx.TxType, req.TxTypes); !ok {
+						continue
+					}
+				}
+			}
+			if req.From != nil {
+				if tx.From.Address != req.From.Address {
+					continue
+				}
+			}
+			if req.To != nil {
+				if tx.To.Address != req.To.Address {
+					continue
+				}
+			}
+			if req.TimeStampFrom != nil {
+				if *tx.Timestamp < *req.TimeStampFrom {
+					continue
+				}
+			}
+			if req.TimeStampTo != nil {
+				if *tx.Timestamp > *req.TimeStampTo {
+					exit = true
+					continue
+				}
+			}
+			result = append(result, tx)
+		}
+		if exit {
+			break
+		}
+	}
+	req.ResponseCh <- result
+	close(req.ResponseCh)
+}
+
 func Start() {
 	go func() {
 		stateCache, _ := lru.New(512)
 		bc := &BlockChain{
-			stateCache:   stateCache,
-			sendTxCh:     SendTxChan,
-			getBalanceCh: GetBalanceChan,
+			stateCache:          stateCache,
+			sendTxCh:            SendTxChan,
+			getBalanceCh:        GetBalanceChan,
+			getTxsWithFiltersCh: GetTxsWithFiltersCh,
 		}
 
 		if !BlocksExist() {
@@ -219,6 +268,8 @@ func Start() {
 				bc.processTx(req)
 			case req := <-bc.getBalanceCh:
 				bc.processBalanceRequest(req)
+			case req := <-bc.getTxsWithFiltersCh:
+				bc.getTransactionsUsingFilters(req)
 			case <-epochTicker.C:
 				bc.processEpoch()
 			}

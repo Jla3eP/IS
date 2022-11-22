@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 )
 
@@ -68,4 +69,8 @@ func GetClosest[T numbers](findIt T, container []T) (index int) {
 		}
 	}
 	return index
+}
+
+func AreEqual[T comparable](a, b []T) bool {
+	return reflect.DeepEqual(a, b)
 }

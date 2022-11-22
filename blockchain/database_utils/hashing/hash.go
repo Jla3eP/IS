@@ -13,12 +13,12 @@ const (
 	hashRepeats = 100
 )
 
-func CreateSaltPasswordHash(salt, password string) string {
+func CreateSaltPasswordHash(salt, password string) []byte {
 	sum := []byte(fmt.Sprintf(hashFormat, salt, password))
 	return CreateHash(sum)
 }
 
-func CreateHash(sum []byte) string {
+func CreateHash(sum []byte) []byte {
 	var crutch [32]byte
 
 	for i := 0; i < hashRepeats; i++ {
@@ -26,7 +26,7 @@ func CreateHash(sum []byte) string {
 		sum = crutch[:]
 	}
 
-	return string(sum)
+	return sum
 }
 
 func HashUsername(username string) [20]byte {

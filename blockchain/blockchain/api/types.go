@@ -79,6 +79,8 @@ type (
 	BlockChain struct {
 		sendTxCh            chan SendTxBcRequest
 		getBalanceCh        chan GetBalanceRequest
+		getTxsWithFiltersCh chan GetTransactionsWithFiltersRequest
+
 		lastFinalizedBlock  *Block
 		lastFinalizedNumber utils.BlockNumber
 		stateCache          *lru.Cache
@@ -125,6 +127,7 @@ type (
 		To            *Account `json:"to,omitempty"`
 		TimeStampFrom *int64   `json:"timeStampFrom,omitempty"`
 		TimeStampTo   *int64   `json:"timeStampTo,omitempty"`
+		ResponseCh    chan Transactions
 	}
 )
 
@@ -217,43 +220,49 @@ func (v *Value_) IsFractionalValid() bool {
 }
 
 func (acc *Account) GetHeadStateBalance(bc *BlockChain) (*Value_, error) {
-	LFN := bc.lastFinalizedNumber
-	if LFN == 0 {
-		return &Value_{0, 0}, nil
-	}
-	numbers := bc.GetLoadedStatesNumbers()
+	//LFN := bc.lastFinalizedNumber
+	//if LFN == 0 {
+	//	return &Value_{0, 0}, nil
+	//}
+	//numbers := bc.GetLoadedStatesNumbers()
+	//
+	//index := utils.GetClosest(LFN, numbers)
+	//closestNumber := numbers[index]
+	//if closestNumber == LFN {
+	//	stateInter, _ := bc.stateCache.Get(closestNumber)
+	//	state := stateInter.(State)
+	//
+	//	balance, ok := state.Balances[acc.Address]
+	//	if !ok {
+	//		return &Value_{0, 0}, nil
+	//	}
+	//
+	//	return &balance, nil
+	//}
+	//
+	//closestStateInter, _ := bc.stateCache.Get(closestNumber)
+	//closestState := closestStateInter.(State)
+	//closestStateBalance := closestState.Balances[acc.Address]
+	//for closestNumber < LFN {
+	//	block := bc.GetBlockByNumber(closestNumber + 1)
+	//	for _, tx := range block.Transactions {
+	//		if tx.To.Address == acc.Address {
+	//			closestStateBalance.Plus(&tx.Value)
+	//		}
+	//		if tx.From.Address == acc.Address {
+	//			closestStateBalance.Minus(&tx.Value)
+	//		}
+	//	}
+	//	closestNumber++
+	//}
+	//
+	//return &closestStateBalance, nil
 
-	index := utils.GetClosest(LFN, numbers)
-	closestNumber := numbers[index]
-	if closestNumber == LFN {
-		stateInter, _ := bc.stateCache.Get(closestNumber)
-		state := stateInter.(State)
+	stateinter, _ := bc.stateCache.Get(bc.lastFinalizedNumber)
 
-		balance, ok := state.Balances[acc.Address]
-		if !ok {
-			return &Value_{0, 0}, nil
-		}
-
-		return &balance, nil
-	}
-
-	closestStateInter, _ := bc.stateCache.Get(closestNumber)
-	closestState := closestStateInter.(State)
-	closestStateBalance := closestState.Balances[acc.Address]
-	for closestNumber < LFN {
-		block := bc.GetBlockByNumber(closestNumber + 1)
-		for _, tx := range block.Transactions {
-			if tx.To.Address == acc.Address {
-				closestStateBalance.Plus(&tx.Value)
-			}
-			if tx.From.Address == acc.Address {
-				closestStateBalance.Minus(&tx.Value)
-			}
-		}
-		closestNumber++
-	}
-
-	return &closestStateBalance, nil
+	state := stateinter.(State)
+	res := state.Balances[acc.Address]
+	return &res, nil
 }
 
 func (tx *Transaction) IsValid(bc *BlockChain) bool {

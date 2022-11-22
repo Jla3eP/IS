@@ -92,7 +92,7 @@ func VerifyPassword(ctx context.Context, user dbtypes.User, clearPassword string
 	}
 	filter := bson.D{{"nickname", user.Username}}
 
-	if user.HashedPassword == "" {
+	if len(user.HashedPassword) == 0 {
 		err := usersCollection.FindOne(ctx, filter).Decode(&user)
 		if err != nil {
 			return false, err
@@ -102,7 +102,7 @@ func VerifyPassword(ctx context.Context, user dbtypes.User, clearPassword string
 	salt := infoToSalt(user)
 	hashPassword := hash.CreateSaltPasswordHash(salt, clearPassword)
 
-	if hashPassword != user.HashedPassword {
+	if !utils.AreEqual(hashPassword, user.HashedPassword) {
 		return false, errors.New("invalid password")
 	}
 
