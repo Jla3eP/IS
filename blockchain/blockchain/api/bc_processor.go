@@ -2,6 +2,7 @@ package api
 
 import (
 	"IS/utils"
+	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/log"
 	lru "github.com/hashicorp/golang-lru"
@@ -9,9 +10,12 @@ import (
 	"time"
 )
 
-var SendTxChan = make(chan SendTxBcRequest, 1)
-var GetBalanceChan = make(chan GetBalanceRequest, 1)
-var GetTxsWithFiltersCh = make(chan GetTransactionsWithFiltersRequest, 1)
+var (
+	SendTxCh            = make(chan SendTxBcRequest, 1)
+	SaveFutureTxCh      = make(chan SendTxBcRequest, 1)
+	GetBalanceCh        = make(chan GetBalanceRequest, 1)
+	GetTxsWithFiltersCh = make(chan GetTransactionsWithFiltersRequest, 1)
+)
 
 func (bc *BlockChain) GetBlockByHash(hash *Hash) *Block {
 	block, err := GetBlockByHash(*hash)
@@ -86,7 +90,7 @@ func (bc *BlockChain) processTx(req SendTxBcRequest) {
 }
 
 func (bc *BlockChain) processEpoch() {
-	if bc.txQueue.IsEmpty() {
+	if bc.txQueue.IsEmpty() && len(bc.futureTransactions) == 0 {
 		log.Info("No transactions to finalize")
 		return
 	}
@@ -100,8 +104,55 @@ func (bc *BlockChain) processEpoch() {
 	}
 	block.GetHash()
 
-	block.Transactions = append(block.Transactions, bc.txQueue.GetMaxCountAndRemove()...)
+	block.Transactions = append(append(block.Transactions, bc.txQueue.GetMaxCountAndRemove()...), bc.getTransactionsToFinalize()...)
+	if len(block.Transactions) == 0 {
+		log.Info("No transactions to finalize")
+		return
+	}
 	bc.finalizeBlock(block)
+}
+
+func (bc *BlockChain) getTransactionsToFinalize() (res Transactions) {
+	now := time.Now().Unix()
+	for i := 0; i < len(bc.futureTransactions); i++ {
+		tx := bc.futureTransactions[i]
+		if tx.Condition.SendAfterBlock != nil && *tx.Condition.SendAfterBlock != bc.lastFinalizedNumber {
+			continue
+		}
+		if tx.Condition.SendAfterTimestamp != nil && *tx.Condition.SendAfterTimestamp > now {
+			continue
+		}
+		switch tx.Condition.Type {
+		case TimeCond:
+			res = append(res, tx)
+			bc.futureTransactions = append(bc.futureTransactions[:i], bc.futureTransactions[i+1:]...)
+			i--
+		case AccountBalanceMoreThen:
+			if val, err := bc.getBalance(bc.lastFinalizedNumber, tx.Condition.CondAccount.Address); err == nil &&
+				val.GreeterThen(tx.Condition.CondValue) {
+				res = append(res, tx)
+				bc.futureTransactions = append(bc.futureTransactions[:i], bc.futureTransactions[i+1:]...)
+				i--
+			}
+		case AccountBalanceLessThen:
+			if val, err := bc.getBalance(bc.lastFinalizedNumber, tx.Condition.CondAccount.Address); err == nil &&
+				val.LessThen(tx.Condition.CondValue) {
+				res = append(res, tx)
+				bc.futureTransactions = append(bc.futureTransactions[:i], bc.futureTransactions[i+1:]...)
+				i--
+			}
+		case AccountSentTransaction:
+			for _, finTx := range bc.lastFinalizedBlock.Transactions {
+				if finTx.From.Address == tx.Condition.CondAccount.Address {
+					res = append(res, tx)
+					bc.futureTransactions = append(bc.futureTransactions[:i], bc.futureTransactions[i+1:]...)
+					i--
+				}
+			}
+		}
+	}
+
+	return res
 }
 
 func (bc *BlockChain) finalizeBlock(block *Block) {
@@ -116,6 +167,11 @@ func (bc *BlockChain) finalizeBlock(block *Block) {
 
 	if err != nil {
 		log.Error("can't finalize block")
+		return
+	}
+
+	for _, tx := range block.Transactions {
+		_ = DeleteTransactionByID(tx.ID)
 	}
 }
 
@@ -156,17 +212,27 @@ func (bc *BlockChain) writeStateUsingLastState(lastState State, block Block) {
 func (bc *BlockChain) processBalanceRequest(req GetBalanceRequest) {
 	defer close(req.ResponseCh)
 	respCh := req.ResponseCh
-	stateInter, exists := bc.stateCache.Get(req.BlockNumber)
-	if !exists || stateInter == nil {
-		respCh <- GetBalanceBCResponse{Err: FutureBlockError}
+
+	res, err := bc.getBalance(req.BlockNumber, req.Address)
+	if err != nil {
+		respCh <- GetBalanceBCResponse{Err: err}
 		return
 	}
 
+	respCh <- GetBalanceBCResponse{Balance: *res}
+}
+
+func (bc *BlockChain) getBalance(blockNumber utils.BlockNumber, addr Address) (*Value_, error) {
+	stateInter, exists := bc.stateCache.Get(blockNumber)
+	if !exists || stateInter == nil {
+		return nil, FutureBlockError
+	}
+
 	state := stateInter.(State)
-	if balance, exists := state.Balances[req.Address]; !exists {
-		respCh <- GetBalanceBCResponse{Err: UnknownAddressError}
+	if balance, exists := state.Balances[addr]; !exists {
+		return nil, UnknownAddressError
 	} else {
-		respCh <- GetBalanceBCResponse{Balance: balance}
+		return &balance, nil
 	}
 }
 
@@ -210,12 +276,12 @@ func (bc *BlockChain) getTransactionsUsingFilters(req GetTransactionsWithFilters
 				}
 			}
 			if req.From != nil {
-				if tx.From.Address != req.From.Address {
+				if tx.From != nil && tx.From.Address != req.From.Address {
 					continue
 				}
 			}
 			if req.To != nil {
-				if tx.To.Address != req.To.Address {
+				if tx.To != nil && tx.To.Address != req.To.Address {
 					continue
 				}
 			}
@@ -240,14 +306,52 @@ func (bc *BlockChain) getTransactionsUsingFilters(req GetTransactionsWithFilters
 	close(req.ResponseCh)
 }
 
+func (bc *BlockChain) processFutureTxRequest(req SendTxBcRequest) {
+	if req.Tx.Condition == nil {
+		req.ResponseCh <- errors.New("missing required parameter: condition")
+		return
+	}
+
+	switch req.Tx.Condition.Type {
+	case AccountBalanceMoreThen, AccountBalanceLessThen:
+		if req.Tx.Condition.CondAccount == nil {
+			req.ResponseCh <- errors.New("missing required parameter: CondAccount")
+			return
+		} else if req.Tx.Condition.CondValue == nil {
+			req.ResponseCh <- errors.New("missing required parameter: CondValue")
+			return
+		}
+	case AccountSentTransaction:
+		if req.Tx.Condition.CondAccount == nil {
+			req.ResponseCh <- errors.New("missing required parameter: CondAccount")
+			return
+		}
+	case TimeCond:
+		//nothing
+	default:
+		req.ResponseCh <- errors.New("unknown cond type")
+	}
+
+	req.Tx.ID = bc.globalTxID
+	bc.globalTxID++
+	bc.futureTransactions = append(bc.futureTransactions, &req.Tx)
+	err := WriteFutureTx(&req.Tx)
+	if err != nil {
+		log.Error("can't write future tx")
+	}
+
+	req.ResponseCh <- nil
+}
+
 func Start() {
 	go func() {
 		stateCache, _ := lru.New(512)
 		bc := &BlockChain{
-			stateCache:          stateCache,
-			sendTxCh:            SendTxChan,
-			getBalanceCh:        GetBalanceChan,
-			getTxsWithFiltersCh: GetTxsWithFiltersCh,
+			stateCache:            stateCache,
+			sendTxCh:              SendTxCh,
+			saveFutureTransaction: SaveFutureTxCh,
+			getBalanceCh:          GetBalanceCh,
+			getTxsWithFiltersCh:   GetTxsWithFiltersCh,
 		}
 
 		if !BlocksExist() {
@@ -260,6 +364,7 @@ func Start() {
 			bc.lastFinalizedNumber = LFB.Number
 		}
 		bc.loadStates()
+		bc.futureTransactions = GetFutureTxs()
 
 		epochTicker := time.NewTicker(EpochDuration)
 		for {
@@ -270,6 +375,8 @@ func Start() {
 				bc.processBalanceRequest(req)
 			case req := <-bc.getTxsWithFiltersCh:
 				bc.getTransactionsUsingFilters(req)
+			case req := <-bc.saveFutureTransaction:
+				bc.processFutureTxRequest(req)
 			case <-epochTicker.C:
 				bc.processEpoch()
 			}

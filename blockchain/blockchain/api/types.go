@@ -20,6 +20,13 @@ const ( // categories
 	Any // api only
 )
 
+const (
+	TimeCond = iota
+	AccountBalanceMoreThen
+	AccountBalanceLessThen
+	AccountSentTransaction
+)
+
 const ( // ETH based
 	HashLen       = 32
 	AddressLen    = 20
@@ -51,20 +58,31 @@ type (
 	}
 
 	Transaction struct {
+		ID          int64    `bson:"ID"`
 		Timestamp   *int64   `bson:"timestamp"` // unix
 		From        *Account `bson:"from"`
 		To          *Account `bson:"to" json:"to"`
 		Value       Value_   `bson:"value" json:"value"`
 		Description string   `bson:"description" json:"description"`
 		TxType      uint32   `bson:"txType" json:"txType"`
+		Condition   *Filter  `json:"condition,omitempty" bson:"condition"`
 	}
 	Transactions []*Transaction
+
+	Filter struct {
+		SendAfterBlock     *utils.BlockNumber `json:"send_after"`
+		SendAfterTimestamp *int64             `json:"send_after_timestamp"`
+
+		Type        int      `json:"type"`
+		CondAccount *Account `json:"cond_account"`
+		CondValue   *Value_  `json:"cond_value"`
+	}
 
 	Block struct {
 		Number       utils.BlockNumber `bson:"number" json:"number"`
 		Transactions Transactions      `bson:"transactions" json:"transactions"`
 		ParentHash   Hash              `bson:"parentHash" json:"parentHash"`
-		TimeStamp    *int64            `bson:"timeStamp" json:"timeStamp,omitempty"` // unix
+		TimeStamp    *int64            `bson:"timeStamp,omitempty" json:"timeStamp,omitempty"` // unix
 		Hash_        atomic.Value
 	}
 	Blocks        []*Block
@@ -77,14 +95,18 @@ type (
 	}
 
 	BlockChain struct {
-		sendTxCh            chan SendTxBcRequest
-		getBalanceCh        chan GetBalanceRequest
-		getTxsWithFiltersCh chan GetTransactionsWithFiltersRequest
+		sendTxCh              chan SendTxBcRequest
+		getBalanceCh          chan GetBalanceRequest
+		getTxsWithFiltersCh   chan GetTransactionsWithFiltersRequest
+		saveFutureTransaction chan SendTxBcRequest
 
 		lastFinalizedBlock  *Block
 		lastFinalizedNumber utils.BlockNumber
 		stateCache          *lru.Cache
 		txQueue             TransactionQueue
+		futureTransactions  Transactions
+
+		globalTxID int64
 
 		mu sync.RWMutex
 	}

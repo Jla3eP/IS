@@ -27,16 +27,17 @@ type (
 	}
 
 	Config struct {
-		DataDirectory       string
-		HttpAddress         string
-		HttpPort            string
-		LogsDir             string
-		DataBaseAddress     string
-		DataBasePort        string
-		DataBaseName        string
-		UsersCollectionName string
-		StateCollectionName string
-		ApiOnly             bool // no tg bot
+		DataDirectory              string
+		HttpAddress                string
+		HttpPort                   string
+		LogsDir                    string
+		DataBaseAddress            string
+		DataBasePort               string
+		DataBaseName               string
+		UsersCollectionName        string
+		StateCollectionName        string
+		TransactionsCollectionName string
+		ApiOnly                    bool // no tg bot
 	}
 )
 
@@ -230,6 +231,21 @@ var (
 				},
 			},
 			DefaultValue: "state",
+		},
+		{
+			Flag: Flag{
+				Flag:        "--txs-collection-name",
+				Required:    false,
+				Description: "set txs collection name to use right collection",
+				Processor: func(config *Config, data string) error {
+					config.TransactionsCollectionName = data
+					return nil
+				},
+				DefaultProcessor: func(config *Config, defaultValue string) {
+					config.TransactionsCollectionName = defaultValue
+				},
+			},
+			DefaultValue: "transactions",
 		},
 	}
 	boolFlagsValues     []string

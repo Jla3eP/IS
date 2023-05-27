@@ -5,7 +5,7 @@ import (
 	"IS/blockchain/config"
 	"encoding/json"
 	"fmt"
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
 	"time"
@@ -25,7 +25,9 @@ func main() {
 }
 
 func runServer(cfg *config.Config) {
-	router := mux.NewRouter()
+	gin.SetMode(gin.ReleaseMode)
+
+	router := gin.Default()
 	handleFuncs(router)
 
 	server := &http.Server{
@@ -50,10 +52,10 @@ func runServer(cfg *config.Config) {
 	}
 }
 
-func handleFuncs(router *mux.Router) {
-	router.HandleFunc("/register", api.CreateUserReq).Methods(http.MethodPost)
-	router.HandleFunc("/sendTx", api.SendTx).Methods(http.MethodPost)
-	router.HandleFunc("/getKey", api.GetPublicKeyByUsername).Methods(http.MethodGet)
-	router.HandleFunc("/getBalance", api.GetBalanceByBlockNumber).Methods(http.MethodGet)
-	router.HandleFunc("/getTxsWithFilters", api.GetTransactionsWithFilters).Methods(http.MethodGet)
+func handleFuncs(router *gin.Engine) {
+	router.POST("/register", api.CreateUserReq)
+	router.POST("/sendTx", api.SendTx)
+	router.GET("/getKey", api.GetPublicKeyByUsername)
+	router.GET("/getBalance", api.GetBalanceByBlockNumber)
+	router.GET("/getTxsWithFilters", api.GetTransactionsWithFilters)
 }

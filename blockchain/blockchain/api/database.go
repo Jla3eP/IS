@@ -17,10 +17,11 @@ import (
 )
 
 var (
-	usersCollection *mongo.Collection
-	stateCollection *mongo.Collection
-	ctx             = context.Background()
-	databaseInited  = false
+	usersCollection        *mongo.Collection
+	stateCollection        *mongo.Collection
+	transactionsCollection *mongo.Collection
+	ctx                    = context.Background()
+	databaseInited         = false
 )
 
 const idAndNicknameToSaltFormat = "%s+%s" //id.InsertedID.(primitive.ObjectID).String(), user.Username
@@ -50,6 +51,24 @@ func GetBlocks() Blocks {
 	}
 
 	return blocks
+}
+
+func GetFutureTxs() Transactions {
+	if !databaseInited {
+		panic("use database_utils.InitDB()")
+	}
+	opts := options.Find()
+	txs := make(Transactions, 0)
+	cursor, err := transactionsCollection.Find(ctx, bson.D{}, opts)
+	if err != nil {
+		return nil
+	}
+	err = cursor.All(context.TODO(), &txs)
+	if err != nil {
+		return nil
+	}
+
+	return txs
 }
 
 func CreateUser(ctx context.Context, user dbtypes.User, clearPassword string) error {
@@ -211,6 +230,32 @@ func WriteBlock(block *Block) error {
 	return nil
 }
 
+func WriteFutureTx(tx *Transaction) error {
+	if !databaseInited {
+		panic("use database_utils.InitDB()")
+	}
+
+	txBSON, err := bson.Marshal(tx)
+	if err != nil {
+		return err
+	}
+
+	_, err = transactionsCollection.InsertOne(ctx, txBSON)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func DeleteTransactionByID(ID int64) error {
+	filter := bson.M{"ID": ID}
+	_, err := transactionsCollection.DeleteOne(context.TODO(), filter)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func infoToSalt(usr dbtypes.User) string {
 	return fmt.Sprintf(idAndNicknameToSaltFormat, usr.ID.String(), usr.Username)
 }
@@ -232,6 +277,7 @@ func InitDB(cfg *config.Config) {
 
 	usersCollection = client.Database(cfg.DataBaseName).Collection(cfg.UsersCollectionName)
 	stateCollection = client.Database(cfg.DataBaseName).Collection(cfg.StateCollectionName)
+	transactionsCollection = client.Database(cfg.DataBaseName).Collection(cfg.TransactionsCollectionName)
 
 	databaseInited = true
 }
