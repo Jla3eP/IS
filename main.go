@@ -28,6 +28,8 @@ func runServer(cfg *config.Config) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.Default()
+	router.Use(gin.Recovery())
+	router.Use(errorsMiddleware())
 	handleFuncs(router)
 
 	server := &http.Server{
@@ -58,4 +60,24 @@ func handleFuncs(router *gin.Engine) {
 	router.GET("/getKey", api.GetPublicKeyByUsername)
 	router.GET("/getBalance", api.GetBalanceByBlockNumber)
 	router.GET("/getTxsWithFilters", api.GetTransactionsWithFilters)
+}
+
+func errorsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+
+		var nilErr *gin.Error = nil
+		err := c.Errors.Last()
+		if err == nilErr {
+			return
+		}
+
+		errCode := err.Error()
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"result":   "error",
+			"err_code": errCode,
+		})
+
+	}
 }
